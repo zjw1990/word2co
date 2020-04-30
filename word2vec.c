@@ -25,10 +25,12 @@
 #define MAX_CODE_LENGTH 40
 #define DIC_SIZE 50
 
-
-
+int *binary_voc_dic;
+int *matrix_t;
+int *matrix_n;
 int START = 1;
-
+int *vocab2dic;
+int dic2vocab[DIC_SIZE];
 
 const int vocab_hash_size = 30000000;  // Maximum 30 * 0.7 = 21M words in the vocabulary
 
@@ -40,9 +42,7 @@ struct vocab_word {
   char *word, *code, codelen;
 };
 
-int word2idx[DIC_SIZE][2];
-int ksmatrix[DIC_SIZE][DIC_SIZE];
-int dic[DIC_SIZE];
+
 
 char train_file[MAX_STRING], output_file[MAX_STRING];
 char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING];
@@ -398,22 +398,22 @@ void InitNet() {
 
 void *TrainModelThread()
 {
-  int **matrix_c;
-  int N = vocab_size;
-  matrix_c =(int **)calloc(N,sizeof(int *));
-  for (int i = 0; i < N; i++)
+
+  matrix_t = (int *)calloc(vocab_size, sizeof(int));
+  for(int i=0; i<vocab_size; i++)
   {
-      matrix_c[i] =(int *)calloc(DIC_SIZE,sizeof(int));
+    matrix_t[i] = (int*)calloc(DIC_SIZE, sizeof(int));
   }
 
-  int **matrix_n;
-  matrix_n =(int **)calloc(N,sizeof(int *));
-  for (int i = 0; i < N; i++)
+  matrix_n = (int *)calloc(vocab_size, sizeof(int));
+  for(int i=0; i<vocab_size; i++)
   {
-      matrix_n[i] =(int *)calloc(DIC_SIZE,sizeof(int));
-
+    matrix_n[i] = (int*)calloc(DIC_SIZE, sizeof(int));
   }
+  memset(matrix_t, 0, vocab_size*DIC_SIZE*sizeof(int));
+  memset(matrix_n, 0, vocab_size*DIC_SIZE*sizeof(int));
 
+  printf("%d\n", matrix_t[0]);
   FILE *fu = fopen("en.dic50","r");
   long dic_word = 0;
   char eof = 0;
@@ -424,15 +424,25 @@ void *TrainModelThread()
     dic_word = ReadWordIndex(fu, &eof);
     if (dic_word!=0)
     {
-        dic[ip] = dic_word;
+        dic2vocab[ip] = dic_word;
         ip++;
     }
   }
-  for(int i = 0 ; i<DIC_SIZE; i++)
+
+  vocab2dic = (int *)calloc(vocab_size, sizeof(int));
+  memset(vocab2dic, 0, sizeof(int) * vocab_size);
+  
+  for(int i=0;i<vocab_size;i++)
   {
-    word2idx[i][0] = dic[i];
-    word2idx[i][1] = i;
+    for(int j = 0; j <DIC_SIZE; j++)
+    {
+      if(i == dic2vocab[j])
+         {
+           vocab2dic[i] = j;
+         }      
+    }
   }
+
 
   long long a, b, d, cw, word, last_word, sentence_length = 0, sentence_position = 0;
   long long word_count = 0, last_word_count = 0, sen[MAX_SENTENCE_LENGTH + 1];
@@ -442,11 +452,15 @@ void *TrainModelThread()
   real f, g;
   clock_t now;
   eof = 0;
-  real *neu1 = (real *)calloc(layer1_size, sizeof(real));
-  real *neu1e = (real *)calloc(layer1_size, sizeof(real));
+  //real *neu1 = (real *)calloc(layer1_size, sizeof(real));
+  //real *neu1e = (real *)calloc(layer1_size, sizeof(real));
   FILE *fi = fopen(train_file, "rb");
+
+
+
   //fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
   while (1) {
+
     if (word_count - last_word_count > 10000) 
     {
       word_count_actual += word_count - last_word_count;
@@ -504,7 +518,6 @@ void *TrainModelThread()
     if (word == -1) continue;
     next_random = next_random * (unsigned long long)25214903917 + 11;
     b = next_random % window;
-    
     if (cbow) {} 
     else { 
        //train skip-gram
@@ -515,11 +528,8 @@ void *TrainModelThread()
         if (c >= sentence_length) continue;
         last_word = sen[c];
         if (last_word == -1) continue;
-        //l1 = last_word * layer1_size;
-        //for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
         // NEGATIVE SAMPLING
-        //find the context
-        
+        //find the contex
         //printf("the context word is: %s \n", vocab[last_word].word);
         context_word = last_word;
         if (negative > 0) for (d = 0; d < negative + 1; d++) 
@@ -530,6 +540,7 @@ void *TrainModelThread()
             //printf("the target word is %s \n", vocab[target].word);
             target_word = target;
             label = 1;
+            buildMatrix((int)context_word,(int)target_word, matrix_t);
           } 
           else 
           {
@@ -538,107 +549,83 @@ void *TrainModelThread()
             if (target == 0) target = next_random % (vocab_size - 1) + 1;
             if (target == word) continue;
             label = 0;
-            negative_word = target;
-            buildMatrix((int)context_word,(int)target_word,matrix_c);
-            buildMatrix((int)negative_word,(int)target_word,matrix_n);
+            negative_word = target;  
+            buildMatrix((int)context_word,(int)negative_word, matrix_n);
             //printf("the negative word is %s \n", vocab[target].word);
           }
-          //l2 = target * layer1_size;
-          //for (c = 0; c < layer1_size; c++) f += syn0[c + l1] * syn1neg[c + l2];
-          //else if (f < -MAX_EXP) g = (label - 0) * alpha;
-          //else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
-          //for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c + l2];
-          //for (c = 0; c < layer1_size; c++) syn1neg[c + l2] += g * syn0[c + l1];
-        }
 
-        // Learn weights input -> hidden
-        //for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
+        }
       }
     }
+    
     sentence_position++;
     if (sentence_position >= sentence_length) {
       sentence_length = 0;
       continue;
     }
+    
   }
-
-  FILE *pFile_c;
-	pFile_c = fopen("matrix_context.txt", "wb");
-	for(int i = 0; i < vocab_size; i++)
+  
+  FILE *pFile_t;
+	pFile_t = fopen("matrix_context.txt", "wb");
+	for(int i = 0; i < vocab_size*DIC_SIZE; i++)
     {
-        for(int j= 0; j < DIC_SIZE; j++)
-        {
-
-            fprintf(pFile_c,"%d ",matrix_c[i][j]);
-        }
-        fprintf(pFile_c,"\n");
+      if (i!=0 && i%DIC_SIZE == 0)
+      {
+        fprintf(pFile_t, "\n");
+      }
+      
+       fprintf(pFile_t, "%d ", matrix_t[i]);
     }
-	fclose(pFile_c);
+	fclose(pFile_t);
 
   FILE *pFile_n;
 	pFile_n = fopen("matrix_negative.txt", "wb");
-	for(int i = 0; i < vocab_size; i++)
+	for(int i = 0; i < vocab_size*DIC_SIZE; i++)
     {
-        for(int j= 0; j < DIC_SIZE; j++)
-        {
-            fprintf(pFile_n,"%d ",matrix_n[i][j]);
-        }
-        fprintf(pFile_n,"\n");
+      if(i!=0 && i%DIC_SIZE ==0)
+      {
+        fprintf(pFile_n,"\n ");
+      }
+      fprintf(pFile_n,"%d ",matrix_n[i]);
     }
 	fclose(pFile_n);
 
-  
-
-
   fclose(fi);
-  free(neu1);
-  free(neu1e);
-  pthread_exit(NULL);
+
 }
 
 void buildMatrix(int c, int w, int matrix[][DIC_SIZE])
 { 
-  
-    if(START)
-    {
-    START = 0;
-    }
-    int a = searchDic(c);
-    int b = searchDic(w);
-    if(a!=-1 && b==-1)
+    int a = vocab2dic[c];
+    int b = vocab2dic[w];
+    
+    // only context is in the dictionary
+    if(a != 0 && b == 0)
     {
       int temp = matrix[w][a];
       temp = temp +1;
       matrix[w][a] = temp;
     }
-    if(a==-1 && b!=-1)
+    if(a ==0 && b != 0)
     {
       int temp = matrix[c][b];
       temp = temp +1;
       matrix[c][b] = temp;
     }
-    if(a!=-1 && b!=-1)
+    if(a !=0 && b!=0)
     {
-      int temp = matrix[w][b];
-      temp = temp+1;
-      matrix[c][b] = temp;
-      matrix[w][a] = temp;
+      // context as col
+      int temp1 = matrix[w][a];
+      temp1 = temp1+1;
+      matrix[w][a] = temp1;
+
+      int temp2= matrix[c][b] ;
+      temp2 = temp2 +1;
+      matrix[c][b] = temp2;
     }   
 }
 
-int searchDic(int x)
-{
-   for(int i=0; i < DIC_SIZE; i++)
-   {
-     if(x == word2idx[i][0])
-     {
-       return i;
-     }
-     
-   }
-   return -1;
-   
-}
 void TrainModel() {
   
   //inital parameters
@@ -654,8 +641,8 @@ void TrainModel() {
   if (save_vocab_file[0] != 0) SaveVocab();
   if (output_file[0] == 0) return;
   
-  
-  
+
+
   // initial the network
   InitNet();
   // negative words?
@@ -807,6 +794,7 @@ int main(int argc, char **argv) {
   if ((i = ArgPos((char *)"-classes", argc, argv)) > 0) classes = atoi(argv[i + 1]);
   //allocate [voc_max_size, voc_word] space, size 8
   vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
+
   //size 8
   vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
   expTable = (real *)malloc((EXP_TABLE_SIZE + 1) * sizeof(real));

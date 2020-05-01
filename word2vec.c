@@ -32,6 +32,7 @@ int START = 1;
 int *vocab2dic;
 int dic2vocab[DIC_SIZE];
 
+
 const int vocab_hash_size = 30000000;  // Maximum 30 * 0.7 = 21M words in the vocabulary
 
 typedef float real;                    // Precision of float numbers
@@ -413,19 +414,25 @@ void *TrainModelThread()
   memset(matrix_t, 0, vocab_size*DIC_SIZE*sizeof(int));
   memset(matrix_n, 0, vocab_size*DIC_SIZE*sizeof(int));
 
-  printf("%d\n", matrix_t[0]);
   FILE *fu = fopen("en.dic50","r");
+  char strLine[100];
+ 
+
   long dic_word = 0;
   char eof = 0;
   
   int ip = 0;
+  int i = 0;
+  
   while (!feof(fu))
   {
     dic_word = ReadWordIndex(fu, &eof);
+    //printf("%s\n", vocab[dic_word].word);
     if (dic_word!=0)
     {
         dic2vocab[ip] = dic_word;
         ip++;
+        printf("%d\n", ip);
     }
   }
 
@@ -457,24 +464,11 @@ void *TrainModelThread()
   FILE *fi = fopen(train_file, "rb");
 
 
-
+  FILE *print_f = fopen("print_text.txt","ab");
   //fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
   while (1) {
-
-    if (word_count - last_word_count > 10000) 
-    {
-      word_count_actual += word_count - last_word_count;
-      last_word_count = word_count;
-      if ((debug_mode > 1)) {
-        now=clock();
-        printf("%cAlpha: %f  Progress: %.2f%%  Words/thread/sec: %.2fk  ", 13, alpha,
-         word_count_actual / (real)(iter * train_words + 1) * 100,
-         word_count_actual / ((real)(now - start + 1) / (real)CLOCKS_PER_SEC * 1000));
-        fflush(stdout);
-      }
-      alpha = starting_alpha * (1 - word_count_actual / (real)(iter * train_words + 1));
-      if (alpha < starting_alpha * 0.0001) alpha = starting_alpha * 0.0001;
-    }
+    
+  
     if (sentence_length == 0) 
     {
       while (1) {
@@ -540,6 +534,7 @@ void *TrainModelThread()
             //printf("the target word is %s \n", vocab[target].word);
             target_word = target;
             label = 1;
+            fprintf(print_f,"COOC context word: %s, target word: %s \n", vocab[context_word].word, vocab[target_word].word);
             buildMatrix((int)context_word,(int)target_word, matrix_t);
           } 
           else 
@@ -550,6 +545,8 @@ void *TrainModelThread()
             if (target == word) continue;
             label = 0;
             negative_word = target;  
+            int m = 0;
+            fprintf(print_f,"NEGA context word: %s, negative word: %s \n", vocab[context_word].word, vocab[negative_word].word);
             buildMatrix((int)context_word,(int)negative_word, matrix_n);
             //printf("the negative word is %s \n", vocab[target].word);
           }
@@ -565,7 +562,7 @@ void *TrainModelThread()
     }
     
   }
-  
+  fclose(print_f);
   FILE *pFile_t;
 	pFile_t = fopen("matrix_context.txt", "wb");
 	for(int i = 0; i < vocab_size*DIC_SIZE; i++)
@@ -590,6 +587,7 @@ void *TrainModelThread()
       fprintf(pFile_n,"%d ",matrix_n[i]);
     }
 	fclose(pFile_n);
+  
 
   fclose(fi);
 
@@ -597,6 +595,7 @@ void *TrainModelThread()
 
 void buildMatrix(int c, int w, int matrix[][DIC_SIZE])
 { 
+
     int a = vocab2dic[c];
     int b = vocab2dic[w];
     
